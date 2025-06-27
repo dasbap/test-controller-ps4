@@ -1,0 +1,55 @@
+# Fichiers et dossiers générés automatiquement par Visual Studio / .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vscode/
+*.log
+
+# Fichiers de build
+*.exe
+*.dll
+*.pdb
+
+# Dossier de test ou de publication
+TestResults/
+*.publish/
+publish/
+
+# Fichiers temporaires
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Dossier de packages NuGet
+packages/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+
+# Fichiers spécifiques à ReSharper/Rider
+.idea/
+*.DotSettings.user
+_ReSharper*/
+*.resharper
+
+# AutoHotkey scripts compilés
+*.ahk
+*.ahk.bak
+
+# Scripts binaires inclus dans le projet, on ignore seulement les versions compilées si elles sont générées
+!scripts/
+scripts/*.exe
+!scripts/BloqueSourisChiaki.exe
+
+# Fichiers de configuration ou secrets locaux
+secrets.json
+appsettings.Local.json
+.env
+.env.*
+
+# Ignorer les fichiers de crash/dumps
+*.dmp
