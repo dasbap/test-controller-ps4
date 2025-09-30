@@ -1,0 +1,40 @@
+{
+  "keyMappings": {
+    "stickLeftUp": [ "Z" ],
+    "stickLeftDown": [ "S" ],
+    "stickLeftLeft": [ "Q" ],
+    "stickLeftRight": [ "D" ],
+    "square": [ "E" ],
+    "cross": [ "Space" ],
+    "circle": [ "LeftClick" ],
+    "triangle": [ "RightClick" ],
+    "l1": [ "LeftCtrl" ],
+    "l2": [ "G" ],
+    "r1": [ "LeftShift", "mouse4", "mouse5" ],
+    "r2": [ "A" ],
+    "l3": [ "T" ],
+    "r3": [ "Y" ],
+    "share": [ "C" ],
+    "options": [ "Escape" ],
+    "dpadUp": [ "Up" ],
+    "dpadDown": [ "Down" ],
+    "dpadLeft": [ "Left" ],
+    "dpadRight": [ "Right" ],
+    "touchpad": ["Tab"],
+    "ps": []
+  },
+  "mouseSettings": {
+    "rightStickSensitivity": 2.0,
+    "left": "LeftClick",
+    "right": "RightClick",
+    "wheel": {
+      "up": "",
+      "down": ""
+    }
+  },
+  "combinations": {
+    "dpadRight": [ "LeftCtrl", "wheelUp" ],
+    "dpadLeft": [ "LeftCtrl", "wheelDown" ],
+    "ps": [ "H", "J" ]
+  }
+}

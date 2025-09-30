@@ -2,127 +2,108 @@
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.DualShock4;
 using SharpDX.DirectInput;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Text.Json;
 
 namespace controller_ps4
 {
     public class DS4VirtualInputBridge : IDisposable
     {
-        private enum VirtualKeyCodes
-        {
-            Escape = 0x01,      // Échap
-            Z = 0x11,           // Z
-            A = 0x10,           // A
-            S = 0x1F,           // S
-            D = 0x20,           // D
-            Space = 0x39,// Espace
-            LeftCtrl = 0x1D,    // Ctrl gauche
-            RightCtrl = 0x9D,   // Ctrl droit
-            LeftShift = 0x2A,   // Maj gauche
-            RightShift = 0x36,  // Maj droit
-            Q = 0x1E,           // Q (en AZERTY0x20, c'est "A"0x20, mais le code physique reste 0x51)
-            E = 0x12,           // E
-            R = 0x13,           // R
-            F = 0x21,           // F
-            W = 0x2C,           // W (anciennement "Z" en QWERTY)
-            X = 0x2D,           // X
-            C = 0x2E,           // C
-            V = 0x2F,           // V
-            Tab = 0x0f,         // Tab
-            CapsLock = 0x4A,    // Verr. Maj
-            Enter = 0x1C,       // Entrée
-            Backspace = 0x0E,   // Retour arrière
-            LeftAlt = 0x38,     // Alt gauche
-            RightAlt = 0xB8,    // AltGr
-            Up = 0xC8,          // Flèche haut
-            Down = 0xD0,        // Flèche bas
-            Left = 0xCb,        // Flèche gauche
-            Right = 0xCD,       // Flèche droite
-            Num0 = 0x52,        // 0
-            Num1 = 0x4f,        // 1
-            Num2 = 0x50,        // 2
-            Num3 = 0x51,        // 3
-            Num4 = 0x4B,        // 4
-            Num5 = 0x4C,        // 5
-            Num6 = 0x4D,        // 6
-            Num7 = 0x47,        // 7
-            Num8 = 0x48,        // 8
-            Num9 = 0x49,        // 9
-            Circumflex = 0x4A,  // ^ (sur AZERTY)
-            ParenRight = 0x4A,  // )
-            Equal = 0x4A,       // =
-            Dollar = 0x4A,      // $
-            Asterisk = 0x4A,    // *
-            Mu = 0x4A,          // µ
-            M = 0x4A,           // M
-            UGrave = 0x4A,      // ù
-            Comma = 0x4A,       // 0x20,
-            Semicolon = 0x4A,   // ;
-            Exclamation = 0x4A, // !
-            PrintScreen = 0x4A, // Impr. écran
-            Delete = 0x4A,      // Suppr
-            Insert = 0xD2,      // Insérer
-            Home = 0x4A,        // Début
-            End = 0x4A,         // Fin
-            PageUp = 0x4A,      // Page précédente
-            PageDown = 0x4A,    // Page suivante
-            F1 = 0x3B,          // F1
-            F2 = 0x3C,          // F2
-            F3 = 0x3D,          // F3
-            F4 = 0x3E,          // F4
-            F5 = 0x3F,          // F5
-            F6 = 0x40,          // F6
-            F7 = 0x41,          // F7
-            F8 = 0x42,          // F8
-            F9 = 0x43,          // F9
-            F10 = 0x44,         // F10
-            F11 = 0x57,         // F11
-            F12 = 0x58,         // F12
-        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
+
+        private const int KEY_PRESSED = 0x8000;
 
         private bool _isRunning;
         private Keyboard? _keyboard;
         private Mouse? _mouse;
         private readonly ViGEmClient _client;
         private readonly IDualShock4Controller _virtualController;
+        private readonly TriggerAccelerator _leftTriggerAccelerator;
+        private readonly TriggerAccelerator _rightTriggerAccelerator;
+        private ControllerConfig _config = new();
+        private int _lastMouseWheelValue;
 
         public DS4VirtualInputBridge()
         {
             _client = new ViGEmClient();
             _virtualController = _client.CreateDualShock4Controller();
+
+            _leftTriggerAccelerator = new TriggerAccelerator(IsKeyPressed, 3.0);
+            _rightTriggerAccelerator = new TriggerAccelerator(IsKeyPressed, 3.0);
+
+            LoadConfiguration();
         }
 
-        public async Task RunAsync(CancellationToken cancellationToken)
+        private void LoadConfiguration()
         {
-            InitializeInputDevices();
-            _virtualController.Connect();
-            ResetControllerAxes();
-
-            _isRunning = true;
-            while (_isRunning && !cancellationToken.IsCancellationRequested)
+            try
             {
-                var inputState = ReadInputState();
-                UpdateVirtualController(inputState);
+                var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "config.json");
+                if (File.Exists(configPath))
+                {
+                    var json = File.ReadAllText(configPath);
+                    Console.WriteLine("📄 Configuration chargée depuis le fichier");
 
-                if (inputState.Options)
-                    _isRunning = false;
+                    using var document = JsonDocument.Parse(json);
+                    var root = document.RootElement;
 
-                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+                    if (root.TryGetProperty("keyMappings", out var keyMappings))
+                    {
+                        foreach (var prop in keyMappings.EnumerateObject())
+                            _config.KeyMappings[prop.Name] = ExtractKeys(prop.Value);
+                    }
+
+                    if (root.TryGetProperty("combinations", out var combos))
+                    {
+                        foreach (var prop in combos.EnumerateObject())
+                            _config.Combinations[prop.Name] = ExtractKeys(prop.Value);
+                    }
+
+                    if (root.TryGetProperty("mouseSettings", out var mouseSettings))
+                    {
+                        if (mouseSettings.TryGetProperty("rightStickSensitivity", out var sens))
+                            _config.MouseSettings.RightStickSensitivity = sens.GetDouble();
+
+                        if (mouseSettings.TryGetProperty("left", out var left))
+                            _config.MouseSettings.Left = left.GetString() ?? "";
+
+                        if (mouseSettings.TryGetProperty("right", out var right))
+                            _config.MouseSettings.Right = right.GetString() ?? "";
+
+                        if (mouseSettings.TryGetProperty("wheel", out var wheel))
+                        {
+                            if (wheel.TryGetProperty("up", out var up))
+                                _config.MouseSettings.WheelUp = up.GetString() ?? "";
+                            if (wheel.TryGetProperty("down", out var down))
+                                _config.MouseSettings.WheelDown = down.GetString() ?? "";
+                        }
+                    }
+
+                    Console.WriteLine("✅ Configuration chargée avec succès");
+                }
+                else
+                {
+                    Console.WriteLine("❌ Fichier config.json non trouvé");
+                }
             }
-
-            _virtualController.Disconnect();
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Erreur chargement config: {ex.Message}");
+            }
         }
 
-        private void ResetControllerAxes()
+        private List<string> ExtractKeys(JsonElement element)
         {
-            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbX, 128);
-            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbY, 128);
-            _virtualController.SetAxisValue(DualShock4Axis.RightThumbX, 128);
-            _virtualController.SetAxisValue(DualShock4Axis.RightThumbY, 128);
-            _virtualController.SetSliderValue(DualShock4Slider.LeftTrigger, 0);
-            _virtualController.SetSliderValue(DualShock4Slider.RightTrigger, 0);
+            var keys = new List<string>();
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray())
+                    if (item.ValueKind == JsonValueKind.String)
+                        keys.Add(item.GetString() ?? "");
+            }
+            else if (element.ValueKind == JsonValueKind.String)
+                keys.Add(element.GetString() ?? "");
+            return keys;
         }
 
         private void InitializeInputDevices()
@@ -137,80 +118,134 @@ namespace controller_ps4
             _mouse.Acquire();
         }
 
-        private InputState ReadInputState()
+        private bool IsKeyPressed(int virtualKey) =>
+            (GetAsyncKeyState(virtualKey) & KEY_PRESSED) != 0;
+
+        private bool IsMouseButtonPressed(int mouseButton) =>
+            (GetAsyncKeyState(mouseButton) & KEY_PRESSED) != 0;
+
+        private bool IsKeyPressed(string key)
         {
-            if (_keyboard != null && _mouse != null)
+            if (string.IsNullOrEmpty(key)) return false;
+            return key.ToUpper() switch
             {
-                _keyboard.Poll();
-                var keyboardState = _keyboard.GetCurrentState();
-
-                _mouse.Poll();
-                var mouseState = _mouse.GetCurrentState();
-
-                var wheelDelta = mouseState.Z;
-                bool trianglePressed = wheelDelta != 0;
-
-                bool leftClick = mouseState.Buttons[1];
-                bool rightClick = mouseState.Buttons[0];
-
-                bool mousebtn4 = mouseState.Buttons[3];
-                bool mousebtn5 = mouseState.Buttons[4];
-
-                int leftX = 0;
-                int leftY = 0;
-
-                if (keyboardState.IsPressed((Key)VirtualKeyCodes.Q)) leftX -= 1;
-                if (keyboardState.IsPressed((Key)VirtualKeyCodes.D)) leftX += 1;
-                if (keyboardState.IsPressed((Key)VirtualKeyCodes.Z)) leftY -= 1;
-                if (keyboardState.IsPressed((Key)VirtualKeyCodes.S)) leftY += 1;
-
-                double length = Math.Sqrt(leftX * leftX + leftY * leftY);
-                if (length > 0)
-                {
-                    leftX = (int)(leftX / length * 127);
-                    leftY = (int)(leftY / length * 127);
-                }
-
-                return new InputState
-                {
-                    DpadUp = keyboardState.IsPressed((Key)VirtualKeyCodes.Up),
-                    DpadDown = keyboardState.IsPressed((Key)VirtualKeyCodes.Down),
-                    DpadLeft = keyboardState.IsPressed((Key)VirtualKeyCodes.Left),
-                    DpadRight = keyboardState.IsPressed((Key)VirtualKeyCodes.Right),
-
-                    Square = keyboardState.IsPressed((Key)VirtualKeyCodes.R),
-                    Cross = keyboardState.IsPressed((Key)VirtualKeyCodes.Space),
-                    Circle = keyboardState.IsPressed((Key)VirtualKeyCodes.F),
-                    Triangle = trianglePressed,
-
-                    L1 = keyboardState.IsPressed((Key)VirtualKeyCodes.LeftCtrl),
-                    R1 = mousebtn5,
-
-                    L1R1 = keyboardState.IsPressed((Key)VirtualKeyCodes.A),
-
-                    Share = keyboardState.IsPressed((Key)VirtualKeyCodes.PrintScreen),
-                    Options = keyboardState.IsPressed((Key)VirtualKeyCodes.Backspace),
-                    PS = keyboardState.IsPressed((Key)VirtualKeyCodes.Escape),
-                    Touchpad = keyboardState.IsPressed((Key)VirtualKeyCodes.Tab),
-
-                    L3 = keyboardState.IsPressed((Key)VirtualKeyCodes.LeftShift),
-                    R3 = mousebtn4,
-
-                    LeftX = (byte)(128 + leftX),
-                    LeftY = (byte)(128 + leftY),
-                    RightX = (byte)(128 + Math.Clamp(mouseState.X *2, -127, 127)),
-                    RightY = (byte)(128 + Math.Clamp(mouseState.Y *2, -127, 127)),
-                    
-                    L2 = leftClick ? (byte)255 : (byte)0.0, 
-                    R2 = rightClick ? (byte)255 : (byte)0,
-            }
-            ;
-            }
-
-            return new InputState();
+                "Z" => IsKeyPressed(0x5A),
+                "Q" => IsKeyPressed(0x51),
+                "S" => IsKeyPressed(0x53),
+                "D" => IsKeyPressed(0x44),
+                "W" => IsKeyPressed(0x57),
+                "A" => IsKeyPressed(0x41),
+                "E" => IsKeyPressed(0x45),
+                "R" => IsKeyPressed(0x52),
+                "T" => IsKeyPressed(0x54),
+                "Y" => IsKeyPressed(0x59),
+                "U" => IsKeyPressed(0x55),
+                "I" => IsKeyPressed(0x49),
+                "O" => IsKeyPressed(0x4F),
+                "P" => IsKeyPressed(0x50),
+                "F" => IsKeyPressed(0x46),
+                "G" => IsKeyPressed(0x47),
+                "H" => IsKeyPressed(0x48),
+                "J" => IsKeyPressed(0x4A),
+                "K" => IsKeyPressed(0x4B),
+                "L" => IsKeyPressed(0x4C),
+                "C" => IsKeyPressed(0x43),
+                "V" => IsKeyPressed(0x56),
+                "B" => IsKeyPressed(0x42),
+                "N" => IsKeyPressed(0x4E),
+                "M" => IsKeyPressed(0x4D),
+                "X" => IsKeyPressed(0x58),
+                "TAB" => IsKeyPressed(0x09),
+                "UP" => IsKeyPressed(0x26),
+                "DOWN" => IsKeyPressed(0x28),
+                "LEFT" => IsKeyPressed(0x25),
+                "RIGHT" => IsKeyPressed(0x27),
+                "SPACE" => IsKeyPressed(0x20),
+                "ESCAPE" => IsKeyPressed(0x1B),
+                "LEFTSHIFT" => IsKeyPressed(0xA0),
+                "LEFTCTRL" => IsKeyPressed(0xA2),
+                "LEFTALT" => IsKeyPressed(0xA4),
+                "LEFTCLICK" => IsMouseButtonPressed(0x01),
+                "RIGHTCLICK" => IsMouseButtonPressed(0x02),
+                "MOUSE4" => IsMouseButtonPressed(0x05),
+                "MOUSE5" => IsMouseButtonPressed(0x06),
+                _ => false
+            };
         }
 
+        private bool AreAllKeysPressed(List<string> keys) =>
+            keys.All(IsKeyPressed);
 
+        private bool AreAnyKeysPressed(List<string> keys) =>
+            keys.Any(IsKeyPressed);
+
+        public async Task RunAsync(CancellationToken cancellationToken)
+        {
+            InitializeInputDevices();
+            _virtualController.Connect();
+            ResetControllerAxes();
+            _isRunning = true;
+
+            Console.WriteLine("🎮 Bridge démarré - Tous les boutons actifs");
+
+            while (_isRunning && !cancellationToken.IsCancellationRequested)
+            {
+                var inputState = ReadInputState();
+                UpdateVirtualController(inputState);
+                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+            }
+
+            _virtualController.Disconnect();
+            Console.WriteLine("🛑 Bridge arrêté");
+        }
+
+        private void ResetControllerAxes()
+        {
+            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbX, 128);
+            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbY, 128);
+            _virtualController.SetAxisValue(DualShock4Axis.RightThumbX, 128);
+            _virtualController.SetAxisValue(DualShock4Axis.RightThumbY, 128);
+            _virtualController.SetSliderValue(DualShock4Slider.LeftTrigger, 0);
+            _virtualController.SetSliderValue(DualShock4Slider.RightTrigger, 0);
+        }
+
+        private InputState ReadInputState()
+        {
+            var inputState = new InputState();
+
+            foreach (var kvp in _config.KeyMappings)
+                if (AreAnyKeysPressed(kvp.Value))
+                    inputState.SetAction(kvp.Key, true);
+
+            foreach (var kvp in _config.Combinations)
+                if (AreAllKeysPressed(kvp.Value))
+                    inputState.SetAction(kvp.Key, true);
+
+            if (_mouse != null)
+            {
+                _mouse.Poll();
+                var mouseState = _mouse.GetCurrentState();
+                float sensitivity = (float)_config.MouseSettings.RightStickSensitivity;
+                inputState.RightX = (byte)(128 + Math.Clamp((int)(mouseState.X * sensitivity), -127, 127));
+                inputState.RightY = (byte)(128 + Math.Clamp((int)(mouseState.Y * sensitivity), -127, 127));
+                HandleMouseWheel(inputState, mouseState);
+            }
+
+            return inputState;
+        }
+
+        private void HandleMouseWheel(InputState inputState, MouseState mouseState)
+        {
+            if (mouseState.Z > _lastMouseWheelValue)
+                if (!string.IsNullOrEmpty(_config.MouseSettings.WheelUp))
+                    inputState.SetAction(_config.MouseSettings.WheelUp, true);
+
+            if (mouseState.Z < _lastMouseWheelValue)
+                if (!string.IsNullOrEmpty(_config.MouseSettings.WheelDown))
+                    inputState.SetAction(_config.MouseSettings.WheelDown, true);
+
+            _lastMouseWheelValue = mouseState.Z;
+        }
 
         private void UpdateVirtualController(InputState s)
         {
@@ -229,26 +264,21 @@ namespace controller_ps4
             _virtualController.SetButtonState(DualShock4Button.Cross, s.Cross);
             _virtualController.SetButtonState(DualShock4Button.Circle, s.Circle);
             _virtualController.SetButtonState(DualShock4Button.Triangle, s.Triangle);
-
-            _virtualController.SetButtonState(DualShock4Button.ShoulderLeft, (s.L1 || s.L1R1));
-            _virtualController.SetButtonState(DualShock4Button.ShoulderRight, (s.R1 || s.L1R1));
-
-            _virtualController.SetButtonState(DualShock4Button.Share, s.Share);
+            _virtualController.SetButtonState(DualShock4Button.ShoulderLeft, s.L1);
+            _virtualController.SetButtonState(DualShock4Button.ShoulderRight, s.R1);
+            _virtualController.SetButtonState(DualShock4Button.ThumbLeft, s.L3);
+            _virtualController.SetButtonState(DualShock4Button.ThumbRight, s.R3);
             _virtualController.SetButtonState(DualShock4Button.Options, s.Options);
             _virtualController.SetButtonState(DualShock4SpecialButton.Ps, s.PS);
             _virtualController.SetButtonState(DualShock4SpecialButton.Touchpad, s.Touchpad);
 
-            _virtualController.SetButtonState(DualShock4Button.ThumbLeft, s.L3);
-            _virtualController.SetButtonState(DualShock4Button.ThumbRight, s.R3);
-
-            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbX, s.LeftX);
-            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbY, s.LeftY);
+            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbX, (byte)(128 + Math.Clamp(s.LeftX, -127, 127)));
+            _virtualController.SetAxisValue(DualShock4Axis.LeftThumbY, (byte)(128 + Math.Clamp(s.LeftY, -127, 127)));
             _virtualController.SetAxisValue(DualShock4Axis.RightThumbX, s.RightX);
             _virtualController.SetAxisValue(DualShock4Axis.RightThumbY, s.RightY);
+            _virtualController.SetSliderValue(DualShock4Slider.LeftTrigger, s.L2);
+            _virtualController.SetSliderValue(DualShock4Slider.RightTrigger, s.R2);
 
-            _virtualController.SetSliderValue(DualShock4Slider.LeftTrigger,s.L2);
-
-            _virtualController.SetSliderValue(DualShock4Slider.RightTrigger,s.R2); 
             _virtualController.SubmitReport();
         }
 
@@ -262,5 +292,76 @@ namespace controller_ps4
             _mouse?.Unacquire();
             _mouse?.Dispose();
         }
+    }
+
+    public class InputState
+    {
+        public bool DpadUp { get; set; }
+        public bool DpadDown { get; set; }
+        public bool DpadLeft { get; set; }
+        public bool DpadRight { get; set; }
+        public bool Square { get; set; }
+        public bool Cross { get; set; }
+        public bool Circle { get; set; }
+        public bool Triangle { get; set; }
+        public bool L1 { get; set; }
+        public bool R1 { get; set; }
+        public bool L3 { get; set; }
+        public bool R3 { get; set; }
+        public bool Share { get; set; }
+        public bool Options { get; set; }
+        public bool Touchpad { get; set; }
+        public bool PS { get; set; }
+        public int LeftX { get; set; }
+        public int LeftY { get; set; }
+        public byte RightX { get; set; } = 128;
+        public byte RightY { get; set; } = 128;
+        public byte L2 { get; set; }
+        public byte R2 { get; set; }
+
+        public void SetAction(string action, bool value)
+        {
+            switch (action.ToLower())
+            {
+                case "dpadup": DpadUp = value; break;
+                case "dpaddown": DpadDown = value; break;
+                case "dpadleft": DpadLeft = value; break;
+                case "dpadright": DpadRight = value; break;
+                case "square": Square = value; break;
+                case "cross": Cross = value; break;
+                case "circle": Circle = value; break;
+                case "triangle": Triangle = value; break;
+                case "l1": L1 = value; break;
+                case "r1": R1 = value; break;
+                case "l3": L3 = value; break;
+                case "r3": R3 = value; break;
+                case "share": Share = value; break;
+                case "options": Options = value; break;
+                case "touchpad": Touchpad = value; break;
+                case "ps": PS = value; break;
+                case "stickleftup": LeftY = -127; break;
+                case "stickleftdown": LeftY = 127; break;
+                case "stickleftleft": LeftX = -127; break;
+                case "stickleftright": LeftX = 127; break;
+                case "l2": L2 = 255; break;
+                case "r2": R2 = 255; break;
+            }
+        }
+    }
+
+    public class ControllerConfig
+    {
+        public Dictionary<string, List<string>> KeyMappings { get; set; } = new();
+        public Dictionary<string, List<string>> Combinations { get; set; } = new();
+        public MouseSettings MouseSettings { get; set; } = new();
+    }
+
+    public class MouseSettings
+    {
+        public double RightStickSensitivity { get; set; } = 2.0;
+        public string Left { get; set; } = "";
+        public string Right { get; set; } = "";
+        public string WheelUp { get; set; } = "";
+        public string WheelDown { get; set; } = "";
     }
 }

@@ -8,22 +8,43 @@ class Program
 
     static async Task Main()
     {
-        Process.Start(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "scripts", "BloqueSourisChiaki.exe"));
-        cts = new CancellationTokenSource(); 
+        ViGEmInstaller.Run();
 
+        cts = new CancellationTokenSource();
         Console.WriteLine("Démarrage de l'émulation manette...");
+        Console.WriteLine("Appuyez sur Ctrl+P pour arrêter l'application");
+
         bridge = new DS4VirtualInputBridge();
         var bridgeTask = bridge.RunAsync(cts.Token);
 
-        Console.WriteLine("Appuyez sur Ctrl+C pour quitter.");
+        _ = Task.Run(async () =>
+        {
+            while (!cts.Token.IsCancellationRequested)
+            {
+                if (Console.KeyAvailable)
+                {
+                    var key = Console.ReadKey(true);
+                    if (key.Key == ConsoleKey.P && (key.Modifiers & ConsoleModifiers.Control) != 0)
+                    {
+                        Console.WriteLine("\nArrêt demandé...");
+                        cts.Cancel();
+                    }
+                }
+                await Task.Delay(100);
+            }
+        });
 
         try
         {
-            await Task.Delay(Timeout.Infinite, cts.Token);
+            await bridgeTask;
         }
-        catch (TaskCanceledException) { }
-
-        Console.WriteLine("Arrêt de l'émulation manette...");
-        bridge?.Dispose();
+        catch (TaskCanceledException)
+        {
+            Console.WriteLine("Arrêt de l'émulation manette...");
+        }
+        finally
+        {
+            bridge?.Dispose();
+        }
     }
 }

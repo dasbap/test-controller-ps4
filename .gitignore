@@ -1,6 +1,7 @@
 # Fichiers et dossiers générés automatiquement par Visual Studio / .NET
 bin/
 obj/
+.vs/
 *.user
 *.suo
 *.userosscache
