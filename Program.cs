@@ -8,7 +8,6 @@ class Program
 
     static async Task Main()
     {
-        ViGEmInstaller.Run();
 
         cts = new CancellationTokenSource();
         Console.WriteLine("Démarrage de l'émulation manette...");
